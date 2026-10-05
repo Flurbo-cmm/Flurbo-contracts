@@ -67,6 +67,86 @@ contract HybridPilotLifecycleTest {
         (ok,) = address(resolver).call(data);
     }
 
+    function realityPair() internal returns (R r, WidePilotPool p) {
+        R.Config memory c;
+        c.collateral = address(token);
+        c.draftHash = keccak256("all reality fixture");
+        c.closesAt = 2000;
+        c.eventHashes = new bytes32[](2);
+        c.eventHashes[0] = bytes32(uint256(1));
+        c.eventHashes[1] = bytes32(uint256(2));
+        c.observationEnds = new uint64[](2);
+        c.observationEnds[0] = 3000;
+        c.observationEnds[1] = 3000;
+        c.routes = new R.Route[](2);
+        c.routes[0] = R.Route.Reality;
+        c.routes[1] = R.Route.Reality;
+        c.proposer = PROPOSER;
+        c.relay = RELAY;
+        c.bond = 1e6;
+        c.assertionPeriod = 3600;
+        c.challengePeriod = 3600;
+        c.reportPeriod = 90 days;
+        c.arbitrationPeriod = 90 days;
+        r = new R(c);
+        uint8[] memory order = new uint8[](2);
+        order[0] = 0;
+        order[1] = 1;
+        p = new WidePilotPool(address(token), 2, 10e6, 2000, order, address(r), r.rulesHash());
+        r.bindPool(address(p));
+        token.mint(address(this), p.requiredFunding());
+        token.approve(address(p), p.requiredFunding());
+        p.fund();
+    }
+
+    function callOn(R target, address sender, bytes memory data) internal returns (bool ok) {
+        vm.prank(sender);
+        (ok,) = address(target).call(data);
+    }
+
+    function testAllRealityPoolReportsAndDelivers() public {
+        (R r, WidePilotPool p) = realityPair();
+        vm.warp(3000);
+        vm.prank(RELAY); r.reportReality(0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json");
+        vm.prank(RELAY); r.reportReality(1, R.Outcome.No, EVIDENCE, "https://example.org/one.json");
+        r.deliver();
+        assert(p.resolved());
+        assert(p.resolvedState() == 1);
+        assert(p.voidMask() == 0);
+    }
+
+    function testRealityReportOutsideWindowRejected() public {
+        (R r,) = realityPair();
+        bytes memory data = abi.encodeCall(R.reportReality, (0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json"));
+        vm.warp(2999);
+        assert(!callOn(r, RELAY, data));
+        vm.warp(3000 + 90 days);
+        assert(!callOn(r, RELAY, data));
+    }
+
+    function testRealityMissingReportBecomesVoid() public {
+        (R r,) = realityPair();
+        vm.warp(3000 + 90 days);
+        r.finalize(0);
+        R.Case memory result = r.caseState(0);
+        assert(result.phase == R.Phase.Finalized && result.result == R.Outcome.Void);
+    }
+
+    function testRealityReportedOnce() public {
+        (R r,) = realityPair();
+        vm.warp(3000);
+        bytes memory data = abi.encodeCall(R.reportReality, (0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json"));
+        assert(callOn(r, RELAY, data));
+        assert(!callOn(r, RELAY, data));
+    }
+
+    function testRealityReportOnlyByRelay() public {
+        (R r,) = realityPair();
+        vm.warp(3000);
+        assert(!callOn(r, PROPOSER, abi.encodeCall(R.reportReality,
+            (0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json"))));
+    }
+
     function testUnchallengedMechanicalAndRealityDeliver() public {
         vm.warp(3000);
         vm.prank(PROPOSER);
