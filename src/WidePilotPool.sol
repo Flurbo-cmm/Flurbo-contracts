@@ -42,7 +42,7 @@ contract WidePilotPool is FactoredTrading {
         baseTokenFactory = new FactoredBaseTokenFactory();
     }
 
-    function protocolVersion() external pure returns (uint8) { return 3; }
+    function protocolVersion() external pure virtual returns (uint8) { return 3; }
 
     function requiredCollateral() public view override returns (uint128) {
         return resolved ? remainingPayout : maximumLiability;

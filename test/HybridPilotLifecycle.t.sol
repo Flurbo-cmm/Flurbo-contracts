@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {HybridPilotResolver as R} from "../src/HybridPilotResolver.sol";
+import {LsPilotPool} from "../src/LsPilotPool.sol";
 import {WidePilotPool} from "../src/WidePilotPool.sol";
 import {MockCollateral} from "./helpers/MockCollateral.sol";
 
@@ -21,7 +22,7 @@ contract HybridPilotLifecycleTest {
 
     MockCollateral token;
     R resolver;
-    WidePilotPool pool;
+    LsPilotPool pool;
 
     function setUp() public {
         vm.chainId(10143);
@@ -51,7 +52,7 @@ contract HybridPilotLifecycleTest {
         uint8[] memory order = new uint8[](2);
         order[0] = 0;
         order[1] = 1;
-        pool = new WidePilotPool(address(token), 2, 10e6, 2000, order, address(resolver), resolver.rulesHash());
+        pool = new LsPilotPool(address(token), 2, 10e6, 500, 2000, order, address(resolver), resolver.rulesHash());
         resolver.bindPool(address(pool));
         token.mint(address(this), pool.requiredFunding());
         token.approve(address(pool), pool.requiredFunding());
@@ -67,7 +68,7 @@ contract HybridPilotLifecycleTest {
         (ok,) = address(resolver).call(data);
     }
 
-    function realityPair() internal returns (R r, WidePilotPool p) {
+    function realityPair() internal returns (R r, LsPilotPool p) {
         R.Config memory c;
         c.collateral = address(token);
         c.draftHash = keccak256("all reality fixture");
@@ -92,7 +93,7 @@ contract HybridPilotLifecycleTest {
         uint8[] memory order = new uint8[](2);
         order[0] = 0;
         order[1] = 1;
-        p = new WidePilotPool(address(token), 2, 10e6, 2000, order, address(r), r.rulesHash());
+        p = new LsPilotPool(address(token), 2, 10e6, 500, 2000, order, address(r), r.rulesHash());
         r.bindPool(address(p));
         token.mint(address(this), p.requiredFunding());
         token.approve(address(p), p.requiredFunding());
@@ -105,7 +106,7 @@ contract HybridPilotLifecycleTest {
     }
 
     function testAllRealityPoolReportsAndDelivers() public {
-        (R r, WidePilotPool p) = realityPair();
+        (R r, LsPilotPool p) = realityPair();
         vm.warp(3000);
         vm.prank(RELAY); r.reportReality(0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json");
         vm.prank(RELAY); r.reportReality(1, R.Outcome.No, EVIDENCE, "https://example.org/one.json");
@@ -257,7 +258,7 @@ contract HybridPilotLifecycleTest {
         c.reportPeriod = 90 days;
         c.arbitrationPeriod = 90 days;
         R many = new R(c);
-        WidePilotPool wide = new WidePilotPool(address(token), 32, 10e6, 2000,
+        LsPilotPool wide = new LsPilotPool(address(token), 32, 10e6, 500, 2000,
             order, address(many), many.rulesHash());
         many.bindPool(address(wide));
         token.mint(address(this), wide.requiredFunding());
@@ -272,5 +273,41 @@ contract HybridPilotLifecycleTest {
         many.deliver();
         assert(wide.resolved());
         assert(wide.resolvedState() == uint32(1) << 31);
+    }
+
+    function testBindPoolRejectsFixedDepthPool() public {
+        R.Config memory c;
+        c.collateral = address(token);
+        c.draftHash = keccak256("fixed depth rejected");
+        c.closesAt = 2000;
+        c.eventHashes = new bytes32[](2);
+        c.eventHashes[0] = bytes32(uint256(1));
+        c.eventHashes[1] = bytes32(uint256(2));
+        c.observationEnds = new uint64[](2);
+        c.observationEnds[0] = 3000;
+        c.observationEnds[1] = 3000;
+        c.routes = new R.Route[](2);
+        c.proposer = PROPOSER;
+        c.relay = RELAY;
+        c.bond = 1e6;
+        c.assertionPeriod = 3600;
+        c.challengePeriod = 3600;
+        c.reportPeriod = 90 days;
+        c.arbitrationPeriod = 90 days;
+        R fresh = new R(c);
+        uint8[] memory order = new uint8[](2);
+        order[1] = 1;
+        WidePilotPool fixedDepth = new WidePilotPool(address(token), 2, 10e6, 2000, order, address(fresh), fresh.rulesHash());
+        try fresh.bindPool(address(fixedDepth)) {
+            assert(false);
+        } catch (bytes memory reason) {
+            assert(reason.length == 4 && bytes4(reason) == R.InvalidConfig.selector);
+        }
+        assert(address(fresh.pool()) == address(0));
+    }
+
+    function testBindPoolAcceptsLsPool() public view {
+        assert(address(resolver.pool()) == address(pool));
+        assert(pool.protocolVersion() == 5);
     }
 }

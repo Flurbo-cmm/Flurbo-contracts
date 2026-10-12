@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {WidePilotPool} from "./WidePilotPool.sol";
+import {LsPilotPool} from "./LsPilotPool.sol";
 
 contract HybridPilotResolver is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -67,7 +67,7 @@ contract HybridPilotResolver is ReentrancyGuard {
     uint64[] public observationEnds;
     Route[] public routes;
     Case[] private cases;
-    WidePilotPool public pool;
+    LsPilotPool public pool;
     bool public delivered;
     mapping(address => uint256) public credits;
     uint256 public lockedBonds;
@@ -122,8 +122,8 @@ contract HybridPilotResolver is ReentrancyGuard {
     function bindPool(address target) external {
         if (msg.sender != creator) revert Unauthorized();
         if (address(pool) != address(0) || target.code.length == 0) revert InvalidConfig();
-        WidePilotPool candidate = WidePilotPool(target);
-        if (candidate.protocolVersion() != 3 || candidate.resolver() != address(this)
+        LsPilotPool candidate = LsPilotPool(target);
+        if (candidate.protocolVersion() != 5 || candidate.resolver() != address(this)
             || candidate.settlementRulesHash() != rulesHash || address(candidate.collateral()) != address(collateral)
             || candidate.eventCount() != eventCount || candidate.closesAt() != closesAt) revert InvalidConfig();
         pool = candidate;
