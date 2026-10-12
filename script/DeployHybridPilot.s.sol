@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {HybridPilotResolver} from "../src/HybridPilotResolver.sol";
-import {WidePilotPool} from "../src/WidePilotPool.sol";
+import {LsPilotPool} from "../src/LsPilotPool.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface HybridDeployVm {
@@ -29,11 +29,11 @@ contract DeployHybridPilot {
     string private constant PREPARED = "target/deployments/hybrid-pilot-prepared.json";
     string private constant OUTPUT = "target/deployments/hybrid-pilot-unverified.json";
 
-    function run() external returns (WidePilotPool pool, HybridPilotResolver resolver) {
+    function run() external returns (LsPilotPool pool, HybridPilotResolver resolver) {
         require(block.chainid == 10143 && !vm.exists(OUTPUT), "new Monad testnet deployment only");
         string memory prepared = vm.readFile(PREPARED);
         require(keccak256(bytes(vm.parseJsonString(prepared, ".schema")))
-            == keccak256(bytes("flurbo.hybrid-prepared.v4")), "wrong preparation version");
+            == keccak256(bytes("flurbo.hybrid-prepared.v5")), "wrong preparation version");
         address creator = vm.envAddress("FLURBO_DEPLOYER");
         require(creator == vm.parseJsonAddress(prepared, ".creator"), "creator mismatch");
         bytes memory encoded = vm.parseJsonBytes(prepared, ".resolverConfig");
@@ -41,25 +41,27 @@ contract DeployHybridPilot {
         require(keccak256(encoded) == configHash, "config hash mismatch");
         HybridPilotResolver.Config memory c = abi.decode(encoded, (HybridPilotResolver.Config));
         uint256 depth = vm.parseJsonUint(prepared, ".liquidityAtoms");
+        uint256 commission = vm.parseJsonUint(prepared, ".commissionBps");
         require(c.collateral == AUSD && c.proposer != creator && c.relay != creator
             && c.proposer != c.relay && c.eventHashes.length >= 2 && c.eventHashes.length <= 32
             && c.closesAt > block.timestamp + 1 hours && c.closesAt <= block.timestamp + 30 days
-            && depth >= 10e6 && depth <= 1e12, "invalid hybrid configuration");
+            && depth >= 10e6 && depth <= 1e12 && commission >= 100 && commission <= 2000, "invalid hybrid configuration");
         require(IERC20Metadata(AUSD).decimals() == 6, "collateral precision mismatch");
         uint8[] memory order = new uint8[](c.eventHashes.length);
         for (uint8 i; i < order.length; ++i) order[i] = i;
         vm.startBroadcast(creator);
         resolver = new HybridPilotResolver(c);
-        pool = new WidePilotPool(AUSD, uint8(order.length), uint128(depth), c.closesAt,
+        pool = new LsPilotPool(AUSD, uint8(order.length), uint128(depth), uint16(commission), c.closesAt,
             order, address(resolver), resolver.rulesHash());
         resolver.bindPool(address(pool));
         uint128 funding = pool.requiredFunding();
         require(IERC20Metadata(AUSD).balanceOf(creator) >= funding, "insufficient test AUSD");
         require(IERC20Metadata(AUSD).approve(address(pool), funding), "approve failed");
         pool.fund();
+        require(pool.depth() == depth * 1e12 && pool.commissionBps() == commission, "pricing mismatch");
         require(IERC20Metadata(AUSD).approve(address(pool), 0), "approval reset failed");
         vm.stopBroadcast();
-        vm.serializeString("hybrid", "schema", "flurbo.hybrid-manifest.v4");
+        vm.serializeString("hybrid", "schema", "flurbo.hybrid-manifest.v5");
         vm.serializeString("hybrid", "status", "unverified_deployment");
         vm.serializeAddress("hybrid", "creator", creator);
         vm.serializeAddress("hybrid", "proposer", c.proposer);
@@ -69,6 +71,9 @@ contract DeployHybridPilot {
         vm.serializeBytes32("hybrid", "draftHash", c.draftHash);
         vm.serializeBytes32("hybrid", "configHash", configHash);
         vm.serializeBytes32("hybrid", "rulesHash", resolver.rulesHash());
+        vm.serializeUint("hybrid", "commissionBps", commission);
+        vm.serializeUint("hybrid", "initialDepthAtoms", depth);
+        vm.serializeUint("hybrid", "depthRate", pool.depthRate());
         string memory output = vm.serializeUint("hybrid", "eventCount", order.length);
         vm.writeJson(output, OUTPUT);
     }
