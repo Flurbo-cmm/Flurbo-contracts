@@ -310,4 +310,34 @@ contract HybridPilotLifecycleTest {
         assert(address(resolver.pool()) == address(pool));
         assert(pool.protocolVersion() == 5);
     }
+
+    function testSurplusReturnsAtCloseAndAfterDeliveryWithoutBlockingSettlement() public {
+        address trader = address(0x7EAD);
+        token.mint(trader, 100e6);
+        vm.prank(trader); token.approve(address(pool), type(uint256).max);
+        vm.prank(trader); uint128 paid = pool.buy(1, 2, 4e6, type(uint128).max, block.timestamp);
+        vm.prank(trader); paid += pool.buy(2, 1, 1e6, type(uint128).max, block.timestamp);
+        uint256 sponsorBefore = token.balanceOf(address(this));
+        vm.warp(2000);
+        assert(pool.sponsor() == address(this));
+        vm.prank(RELAY); uint128 atClose = pool.withdrawSurplus();
+        assert(token.balanceOf(address(pool)) == pool.requiredCollateral());
+        vm.warp(3000);
+        vm.prank(PROPOSER);
+        resolver.propose(0, R.Outcome.Yes, EVIDENCE, "https://example.org/mechanical.json");
+        vm.prank(RELAY);
+        resolver.reportReality(1, R.Outcome.Yes, EVIDENCE, "https://example.org/reality.json");
+        vm.warp(6600);
+        resolver.finalize(0);
+        resolver.deliver();
+        assert(pool.resolved());
+        uint128 atSettlement = pool.withdrawSurplus();
+        assert(pool.requiredCollateral() == 4e6);
+        vm.prank(trader); assert(pool.redeem(1, 2, 4e6) == 4e6);
+        vm.prank(trader); assert(pool.redeem(2, 1, 1e6) == 0);
+        assert(token.balanceOf(address(pool)) == 0);
+        assert(token.balanceOf(address(this)) - sponsorBefore == uint256(atClose) + atSettlement);
+        assert(uint256(atClose) + atSettlement == pool.requiredFunding() + paid - 4e6);
+        assert(atClose == 11697257 && atSettlement == 1000000);
+    }
 }

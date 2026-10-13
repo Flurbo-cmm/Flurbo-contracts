@@ -59,6 +59,7 @@ contract DeployHybridPilot {
         require(IERC20Metadata(AUSD).approve(address(pool), funding), "approve failed");
         pool.fund();
         require(pool.depth() == depth * 1e12 && pool.commissionBps() == commission, "pricing mismatch");
+        require(pool.sponsor() == creator, "sponsor mismatch");
         require(IERC20Metadata(AUSD).approve(address(pool), 0), "approval reset failed");
         vm.stopBroadcast();
         vm.serializeString("hybrid", "schema", "flurbo.hybrid-manifest.v5");
