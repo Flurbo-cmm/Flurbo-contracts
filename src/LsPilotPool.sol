@@ -65,6 +65,7 @@ contract LsPilotPool is WidePilotPool {
     function priceTrade(uint32 scope, uint256 mask, uint128 quantity, uint128 limit, bool isBuy)
         internal
         view
+        virtual
         override
         returns (Q.Quote memory quote, uint128 reserve)
     {
