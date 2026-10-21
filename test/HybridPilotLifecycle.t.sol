@@ -4,6 +4,9 @@ pragma solidity 0.8.28;
 import {HybridPilotResolver as R} from "../src/HybridPilotResolver.sol";
 import {LsPilotPool} from "../src/LsPilotPool.sol";
 import {WidePilotPool} from "../src/WidePilotPool.sol";
+import {CondPilotPool} from "../src/CondPilotPool.sol";
+import {LsPricer} from "../src/LsPricer.sol";
+import {ConditionalShape as S} from "../src/ConditionalShape.sol";
 import {MockCollateral} from "./helpers/MockCollateral.sol";
 
 interface HybridVm {
@@ -339,5 +342,59 @@ contract HybridPilotLifecycleTest {
         assert(token.balanceOf(address(this)) - sponsorBefore == uint256(atClose) + atSettlement);
         assert(uint256(atClose) + atSettlement == pool.requiredFunding() + paid - 4e6);
         assert(atClose == 11697257 && atSettlement == 1000000);
+    }
+
+    function testConditionalPoolSettlesThroughHybridResolver() public {
+        R.Config memory c;
+        c.collateral = address(token);
+        c.draftHash = keccak256("conditional reality fixture");
+        c.closesAt = 2000;
+        c.eventHashes = new bytes32[](2);
+        c.eventHashes[0] = bytes32(uint256(1));
+        c.eventHashes[1] = bytes32(uint256(2));
+        c.observationEnds = new uint64[](2);
+        c.observationEnds[0] = 3000;
+        c.observationEnds[1] = 3000;
+        c.routes = new R.Route[](2);
+        c.routes[0] = R.Route.Reality;
+        c.routes[1] = R.Route.Reality;
+        c.proposer = PROPOSER;
+        c.relay = RELAY;
+        c.bond = 1e6;
+        c.assertionPeriod = 3600;
+        c.challengePeriod = 3600;
+        c.reportPeriod = 90 days;
+        c.arbitrationPeriod = 90 days;
+        R r = new R(c);
+        uint8[] memory order = new uint8[](2);
+        order[1] = 1;
+        CondPilotPool p = new CondPilotPool(address(token), 2, 10e6, 500, 2000, order, address(r), r.rulesHash(), new LsPricer());
+        r.bindPool(address(p));
+        assert(address(r.pool()) == address(p));
+        token.mint(address(this), p.requiredFunding());
+        token.approve(address(p), p.requiredFunding());
+        p.fund();
+        address normal = address(0x7EAD);
+        address conditional = address(0xC0DE);
+        token.mint(normal, 100e6);
+        token.mint(conditional, 100e6);
+        vm.prank(normal); token.approve(address(p), type(uint256).max);
+        vm.prank(conditional); token.approve(address(p), type(uint256).max);
+        vm.prank(normal); p.buy(1, 2, 2e6, type(uint128).max, block.timestamp);
+        S.Shape memory shape = S.Shape(1, 2, 2, 2);
+        vm.prank(conditional); p.buyConditional(shape, 1e6, 8e5, block.timestamp);
+        uint256 sponsorBefore = token.balanceOf(address(this));
+        vm.warp(3000);
+        vm.prank(RELAY); r.reportReality(0, R.Outcome.Yes, EVIDENCE, "https://example.org/zero.json");
+        vm.prank(RELAY); r.reportReality(1, R.Outcome.Yes, EVIDENCE, "https://example.org/one.json");
+        r.deliver();
+        assert(p.resolved() && p.resolvedState() == 3 && p.voidMask() == 0);
+        assert(p.requiredCollateral() == 3e6);
+        vm.prank(normal); assert(p.redeem(1, 2, 2e6) == 2e6);
+        vm.prank(conditional); assert(p.redeemConditional(shape) == 1e6);
+        assert(p.requiredCollateral() == 0);
+        uint128 returned = p.withdrawSurplus();
+        assert(returned > 0 && token.balanceOf(address(p)) == 0);
+        assert(token.balanceOf(address(this)) - sponsorBefore == returned);
     }
 }

@@ -21,7 +21,7 @@ contract WidePilotPool is FactoredTrading {
     bool public resolved;
     uint32 public resolvedState;
     uint32 public voidMask;
-    uint128 private remainingPayout;
+    uint128 internal remainingPayout;
     FactoredBaseTokenFactory public immutable baseTokenFactory;
     mapping(uint32 => mapping(uint8 => FactoredBaseToken)) public baseTokens;
 
