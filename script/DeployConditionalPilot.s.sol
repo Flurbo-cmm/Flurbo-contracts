@@ -31,6 +31,7 @@ contract DeployConditionalPilot {
     string private constant PREPARED = "target/deployments/conditional-pilot-prepared.json";
     string private constant PRICER = "target/deployments/ls-pricer.json";
     string private constant OUTPUT = "target/deployments/conditional-pilot-unverified.json";
+    uint256 private constant MAX_CLOSE = 365 days;
 
     function run() external returns (CondPilotPool pool, HybridPilotResolver resolver) {
         require(block.chainid == 10143 && !vm.exists(OUTPUT), "new Monad testnet deployment only");
@@ -47,10 +48,7 @@ contract DeployConditionalPilot {
         HybridPilotResolver.Config memory c = abi.decode(encoded, (HybridPilotResolver.Config));
         uint256 depth = vm.parseJsonUint(prepared, ".liquidityAtoms");
         uint256 commission = vm.parseJsonUint(prepared, ".commissionBps");
-        require(c.collateral == AUSD && c.proposer != creator && c.relay != creator
-            && c.proposer != c.relay && c.eventHashes.length >= 2 && c.eventHashes.length <= 32
-            && c.closesAt > block.timestamp + 1 hours && c.closesAt <= block.timestamp + 30 days
-            && depth >= 10e6 && depth <= 1e12 && commission >= 100 && commission <= 2000, "invalid conditional configuration");
+        checkConfig(creator, c, depth, commission);
         require(IERC20Metadata(AUSD).decimals() == 6, "collateral precision mismatch");
         (pool, resolver) = deploy(creator, c, depth, commission, pricer);
         vm.serializeString("hybrid", "schema", "flurbo.hybrid-manifest.v5");
@@ -70,6 +68,13 @@ contract DeployConditionalPilot {
         vm.serializeUint("hybrid", "conditionalVersion", 1);
         string memory output = vm.serializeUint("hybrid", "eventCount", c.eventHashes.length);
         vm.writeJson(output, OUTPUT);
+    }
+
+    function checkConfig(address creator, HybridPilotResolver.Config memory c, uint256 depth, uint256 commission) internal view {
+        require(c.collateral == AUSD && c.proposer != creator && c.relay != creator
+            && c.proposer != c.relay && c.eventHashes.length >= 2 && c.eventHashes.length <= 32
+            && c.closesAt > block.timestamp + 1 hours && c.closesAt <= block.timestamp + MAX_CLOSE
+            && depth >= 10e6 && depth <= 1e12 && commission >= 100 && commission <= 2000, "invalid conditional configuration");
     }
 
     function deploy(address creator, HybridPilotResolver.Config memory c, uint256 depth, uint256 commission, LsPricer pricer)
